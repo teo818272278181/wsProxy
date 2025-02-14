@@ -9,8 +9,9 @@ var mes  = require('./message');
  */
 var Proxy = function Constructor(ws) {
     this._tcp = null;
-    this._from = ws._socket.remoteAddress; // Sửa lại để lấy địa chỉ IP đúng hơn
-    this._to = ws.url.substr(1);
+    this._from = ws._socket.remoteAddress; // Lấy địa chỉ IP client
+    this._to = ws.url.substr(1); // Lấy URL WebSocket (dạng mã hóa)
+
     this._ws = ws;
 
     // Bind sự kiện WebSocket
@@ -18,39 +19,43 @@ var Proxy = function Constructor(ws) {
     this._ws.on('close', this.close.bind(this));
     this._ws.on('error', this.close.bind(this));
 
-    // Phân tích địa chỉ kết nối
-    var args = this._to.split(':');
+    // Giải mã Base64 nếu cần
+    try {
+        var decodedTo = Buffer.from(this._to, 'base64').toString('utf-8');
+        var args = decodedTo.split(':');
 
-    // Kiểm tra định dạng "host:port"
-    if (args.length !== 2 || isNaN(args[1])) {
-        mes.info("Invalid connection target: '%s'", this._to);
+        // Kiểm tra định dạng "host:port"
+        if (args.length !== 2 || isNaN(args[1])) {
+            throw new Error("Invalid connection target: " + decodedTo);
+        }
+
+        var host = args[0];
+        var port = parseInt(args[1], 10);
+
+        // Kết nối đến server
+        mes.info("Requested connection from '%s' to '%s' [ACCEPTED].", this._from, decodedTo);
+        this._tcp = net.connect({ port: port, host: host });
+
+        // Cấu hình TCP
+        this._tcp.setTimeout(0);
+        this._tcp.setNoDelay(true);
+
+        // Bind sự kiện TCP
+        this._tcp.on('data', this.serverData.bind(this));
+        this._tcp.on('close', this.close.bind(this));
+        this._tcp.on('error', this.handleError.bind(this));
+        this._tcp.on('connect', this.connectAccept.bind(this));
+    } catch (error) {
+        mes.info("Failed to decode target: %s", error.message);
         this._ws.close();
-        return;
     }
-
-    var host = args[0];
-    var port = parseInt(args[1], 10);
-
-    // Kết nối đến server
-    mes.info("Requested connection from '%s' to '%s' [ACCEPTED].", this._from, this._to);
-    this._tcp = net.connect({ port: port, host: host });
-
-    // Cấu hình kết nối TCP
-    this._tcp.setTimeout(0);
-    this._tcp.setNoDelay(true);
-
-    // Bind sự kiện TCP
-    this._tcp.on('data', this.serverData.bind(this));
-    this._tcp.on('close', this.close.bind(this));
-    this._tcp.on('error', this.handleError.bind(this));
-    this._tcp.on('connect', this.connectAccept.bind(this));
 };
 
 /**
  * Xử lý dữ liệu từ Client -> Server
  */
 Proxy.prototype.clientData = function (data) {
-    if (!this._tcp) return; // Chưa kết nối TCP thì bỏ qua
+    if (!this._tcp) return; // Nếu chưa kết nối TCP thì bỏ qua
 
     try {
         this._tcp.write(data);
