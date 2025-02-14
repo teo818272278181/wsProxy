@@ -10,9 +10,16 @@ var mes  = require('./message');
 var Proxy = function Constructor(ws) {
     this._tcp = null;
     this._from = ws._socket.remoteAddress; // Lấy địa chỉ IP client
-    this._to = ws.url.substr(1); // Lấy URL WebSocket (dạng mã hóa)
+    this._to = ws.protocol || ""; // Lấy địa chỉ kết nối từ protocol
 
     this._ws = ws;
+
+    // Kiểm tra nếu _to rỗng -> đóng kết nối
+    if (!this._to) {
+        mes.info("Invalid WebSocket request (missing target address).");
+        this._ws.close();
+        return;
+    }
 
     // Bind sự kiện WebSocket
     this._ws.on('message', this.clientData.bind(this));
